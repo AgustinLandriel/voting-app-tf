@@ -48,3 +48,19 @@ variable "major_engine_version" {
   type        = string
   default     = "17"
 }
+
+variable "db_name" {
+  description = "Nombre de la base que crea RDS al inicializar"
+  type        = string
+}
+
+variable "username" {
+  description = "Usuario master"
+  type        = string
+}
+
+variable "password" {
+  description = "Password del usuario master, leida de Secrets Manager"
+  type        = string
+  sensitive   = true
+}
