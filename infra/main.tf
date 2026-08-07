@@ -37,19 +37,18 @@ module "postgresql_security_group" {
 }
 
 module "rds" {
-  source                      = "./modules/rds"
-  name_db                     = var.name_db
-  engine                      = "postgres"
-  engine_version              = "17"
-  instance_class              = "db.t4g.micro"
-  allocated_storage           = 20
-  db_security_group_ids       = [module.postgresql_security_group.sg_id]
-  subnet_ids                  = [module.vpc.public_subnets[0], module.vpc.public_subnets[1]]
-  family                      = "postgres17"
-  major_engine_version        = "17"
-  db_name                     = local.db_credenciales.POSTGRES_DB
-  username                    = local.db_credenciales.POSTGRES_USER
-  password                    = local.db_credenciales.POSTGRES_PASSWORD
-  manage_master_user_password = false
+  source                = "./modules/rds"
+  name_db               = var.name_db
+  engine                = "postgres"
+  engine_version        = "17"
+  instance_class        = "db.t4g.micro"
+  allocated_storage     = 20
+  db_security_group_ids = [module.postgresql_security_group.sg_id]
+  subnet_ids            = [module.vpc.public_subnets[0], module.vpc.public_subnets[1]]
+  family                = "postgres17"
+  major_engine_version  = "17"
+  db_name               = local.db_credenciales.POSTGRES_DB
+  username              = local.db_credenciales.POSTGRES_USER
+  password              = local.db_credenciales.POSTGRES_PASSWORD
 
 }
