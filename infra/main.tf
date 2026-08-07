@@ -11,7 +11,7 @@ terraform {
   # Mismo bucket que bootstrap, pero otro key: es otro state, independiente.
   backend "s3" {
     bucket       = "voting-app-tf-state-325503636955"
-    key          = "rds/terraform.tfstate"
+    key          = "infra/terraform.tfstate"
     use_lockfile = true
     region       = "us-east-2"
     profile      = "alandriel"
@@ -44,7 +44,7 @@ module "rds" {
   instance_class        = "db.t4g.micro"
   allocated_storage     = 20
   db_security_group_ids = [module.postgresql_security_group.sg_id]
-  subnet_ids            = [module.vpc.public_subnets[0], module.vpc.public_subnets[1]]
+  subnet_ids            = module.vpc.public_subnets
   family                = "postgres17"
   major_engine_version  = "17"
 }

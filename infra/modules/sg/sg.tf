@@ -7,7 +7,7 @@ module "postgresql_security_group" {
   vpc_id      = var.vpc_id
 
   ingress_cidr_ipv4 = {
-    vpc = "${var.vpc_cidr}"
+    minikube = var.public_ip
 
   }
 
