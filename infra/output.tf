@@ -4,5 +4,5 @@ output "DB_HOST" {
 }
 output "DB_ENDPOINT" {
   value       = module.rds.rds_endpoint
-  description = "Pegar en DATABASE_URL de k8s/postgres/configMaps.yaml"
+  description = "URL de la DB"
 }
