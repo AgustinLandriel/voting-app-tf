@@ -68,18 +68,3 @@ variable "name_db" {
   type        = string
 }
 
-variable "database" {
-  description = "Nombre de la base que crea RDS al inicializar"
-  type        = string
-}
-
-variable "username" {
-  description = "Usuario master"
-  type        = string
-}
-
-variable "password" {
-  description = "Password del usuario master, leida de Secrets Manager"
-  type        = string
-  sensitive   = true
-}
