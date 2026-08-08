@@ -11,7 +11,7 @@ terraform {
   # Mismo bucket que bootstrap, pero otro key: es otro state, independiente.
   backend "s3" {
     bucket       = "voting-app-tf-state-325503636955"
-    key          = "rds/terraform.tfstate"
+    key          = "infra/terraform.tfstate"
     use_lockfile = true
     region       = "us-east-2"
     profile      = "alandriel"
