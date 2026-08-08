@@ -19,7 +19,7 @@
 *.tfvars
 *.tfvars.json
 !*.tfvars.example
-
+!terraform.tfvars
 # ---- Planes guardados (pueden incluir valores sensibles) ----
 *.tfplan
 tfplan
