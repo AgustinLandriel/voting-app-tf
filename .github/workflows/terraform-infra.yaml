@@ -1,0 +1,209 @@
+name: Terraform - infra
+
+# En el PR: plan (solo lee, comenta el resultado).
+# En el merge a main: apply.
+#
+# Solo el stack infra/. bootstrap/ queda AFUERA a proposito: usa estado local
+# porque es el que crea el bucket de estado, y no tiene sentido correrlo en CI.
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "infra/**"
+      # Incluimos el propio workflow: sin esto, cambiarlo no lo dispara
+      # y se mergea sin haberse ejecutado nunca.
+      - ".github/workflows/terraform-infra.yaml"
+  push:
+    branches:
+      - main
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform-infra.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write # para comentar el plan en el PR
+
+# El state de S3 ya tiene lock nativo (use_lockfile), asi que dos apply
+# simultaneos fallarian con error de lock. Esto los encola antes de llegar
+# a ese punto y evita el ruido.
+concurrency:
+  group: terraform-infra
+  cancel-in-progress: false
+
+env:
+  # Misma version que se usa en local (tfenv). Pinear evita que un upgrade
+  # del binario cambie el plan sin que nadie haya tocado codigo.
+  TF_VERSION: "1.15.7"
+  AWS_REGION: us-east-2
+  # public_ip no tiene default y vive en local.auto.tfvars, que esta
+  # gitignoreado. En CI se inyecta por variable de entorno.
+  TF_VAR_public_ip: ${{ secrets.TF_VAR_PUBLIC_IP }}
+
+jobs:
+  # ─────────────────────────────────────────────────────────
+  # PR: valida y planifica. No modifica nada en AWS.
+  # ─────────────────────────────────────────────────────────
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./infra
+
+    steps:
+      - name: Checkout del codigo
+        uses: actions/checkout@v4
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Formato: falla si algun .tf no esta formateado. Es lo mas barato
+      # de chequear y evita diffs de ruido en los PR.
+      - name: Chequear formato
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Init
+        id: init
+        run: terraform init
+
+      # Valida sintaxis y coherencia de tipos. No consulta a AWS.
+      - name: Validate
+        id: validate
+        run: terraform validate -no-color
+
+      # continue-on-error para que el comentario del PR se publique igual
+      # cuando el plan falla: el error es justo lo que hay que leer.
+      - name: Plan
+        id: plan
+        run: terraform plan -input=false
+        continue-on-error: true
+
+      - name: Comentar el plan en el PR
+        uses: actions/github-script@v7
+        env:
+          PLAN: ${{ steps.plan.outputs.stdout }}
+          PLAN_STDERR: ${{ steps.plan.outputs.stderr }}
+        with:
+          script: |
+            const salida = process.env.PLAN || process.env.PLAN_STDERR || '(sin salida)';
+
+            // Los comentarios de GitHub cortan en 65536 caracteres.
+            // Recortamos con margen para el resto del cuerpo.
+            const LIMITE = 60000;
+            const plan = salida.length > LIMITE
+              ? salida.slice(0, LIMITE) + '\n\n...(salida recortada, ver el log completo del job)'
+              : salida;
+
+            const icono = (r) => r === 'success' ? '✅' : '❌';
+
+            const cuerpo = `### Terraform \`infra/\`
+
+            | Paso | Resultado |
+            |---|---|
+            | Formato   | ${icono('${{ steps.fmt.outcome }}')} \`${{ steps.fmt.outcome }}\` |
+            | Init      | ${icono('${{ steps.init.outcome }}')} \`${{ steps.init.outcome }}\` |
+            | Validate  | ${icono('${{ steps.validate.outcome }}')} \`${{ steps.validate.outcome }}\` |
+            | Plan      | ${icono('${{ steps.plan.outcome }}')} \`${{ steps.plan.outcome }}\` |
+
+            <details><summary>Ver el plan completo</summary>
+
+            \`\`\`terraform
+            ${plan}
+            \`\`\`
+
+            </details>
+
+            *Commit: \`${{ github.sha }}\` — al mergear este PR se ejecuta \`terraform apply\`.*`;
+
+            // Reusamos el comentario anterior del bot en vez de agregar uno
+            // nuevo por cada push: si no, un PR con 10 commits queda ilegible.
+            const comentarios = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const previo = comentarios.data.find(c =>
+              c.user.type === 'Bot' && c.body.includes('### Terraform `infra/`')
+            );
+
+            if (previo) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previo.id,
+                body: cuerpo,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: cuerpo,
+              });
+            }
+
+      # El continue-on-error de arriba deja el job en verde aunque el plan
+      # haya fallado. Esto lo vuelve a poner en rojo, ya con el comentario
+      # publicado, para que el check bloquee el merge.
+      - name: Fallar si el plan fallo
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+  # ─────────────────────────────────────────────────────────
+  # Merge a main: aplica de verdad.
+  # ─────────────────────────────────────────────────────────
+  apply:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./infra
+
+    steps:
+      - name: Checkout del codigo
+        uses: actions/checkout@v4
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Init
+        run: terraform init
+
+      # -input=false: si a Terraform le faltara una variable, en vez de
+      # quedarse esperando input hasta el timeout, falla al toque.
+      - name: Apply
+        run: terraform apply -auto-approve -input=false -no-color
+
+      - name: Publicar outputs en el resumen
+        if: success()
+        run: |
+          {
+            echo "### Outputs de \`infra/\`"
+            echo ""
+            echo '```'
+            terraform output || echo "(sin outputs)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
