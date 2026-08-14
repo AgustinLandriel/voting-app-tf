@@ -5,9 +5,9 @@ variable "region" {
 }
 
 variable "aws_profile" {
-  description = "Perfil del CLI en ~/.aws/credentials usado para autenticar"
+  description = "Perfil del CLI en ~/.aws/credentials. null = usa la cadena de credenciales por defecto (env vars en CI, AWS_PROFILE en local)"
   type        = string
-  default     = "alandriel"
+  default     = null
 }
 
 variable "project" {

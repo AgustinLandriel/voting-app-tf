@@ -9,12 +9,16 @@ terraform {
   }
 
   # Mismo bucket que bootstrap, pero otro key: es otro state, independiente.
+  #
+  # Sin `profile`: en CI las credenciales llegan por variables de entorno
+  # (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) y un profile hardcodeado
+  # las ignora y rompe con "failed to get shared config profile".
+  # En local: `export AWS_PROFILE=alandriel` antes de correr terraform.
   backend "s3" {
     bucket       = "voting-app-tf-state-325503636955"
     key          = "infra/terraform.tfstate"
     use_lockfile = true
     region       = "us-east-2"
-    profile      = "alandriel"
   }
 }
 
