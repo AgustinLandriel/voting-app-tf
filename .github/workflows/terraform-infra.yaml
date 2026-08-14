@@ -2,6 +2,10 @@ name: Terraform - infra
 
 # En el PR: plan (solo lee, comenta el resultado).
 # En el merge a main: apply.
+# A mano (Run workflow): apply o destroy, se elige con el input `accion`.
+#
+# El destroy a mano existe para poder apagar la infra (sobre todo el RDS, que
+# factura por hora) sin depender de correr terraform en local.
 #
 # Solo el stack infra/. bootstrap/ queda AFUERA a proposito: usa estado local
 # porque es el que crea el bucket de estado, y no tiene sentido correrlo en CI.
@@ -21,6 +25,18 @@ on:
       - "infra/**"
       - ".github/workflows/terraform-infra.yaml"
   workflow_dispatch:
+    inputs:
+      accion:
+        description: "Que hacer con el stack infra/"
+        type: choice
+        options:
+          - apply
+          - destroy
+        default: apply
+      confirmacion:
+        description: "Solo para destroy: escribi 'destruir' para confirmar"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -164,10 +180,19 @@ jobs:
         run: exit 1
 
   # ─────────────────────────────────────────────────────────
-  # Merge a main: aplica de verdad.
+  # Merge a main (o dispatch con accion=apply): aplica de verdad.
+  #
+  # Los parentesis importan: sin ellos, `&&` liga mas fuerte que `||` y la
+  # condicion se leeria como `(push && main) || dispatch`, o sea que un
+  # dispatch aplicaria desde cualquier rama. En workflow_dispatch el
+  # github.ref es la rama elegida en el dropdown de la UI, no siempre main.
   # ─────────────────────────────────────────────────────────
   apply:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      (
+        github.event_name == 'push' ||
+        (github.event_name == 'workflow_dispatch' && inputs.accion == 'apply')
+      ) && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -206,4 +231,72 @@ jobs:
             echo '```'
             terraform output || echo "(sin outputs)"
             echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────
+  # Solo a mano: destruye el stack. Pensado para apagar el RDS.
+  #
+  # El chequeo de la confirmacion es un step que FALLA, no un `if` a nivel
+  # job: un job skipped cuenta como exito y el run quedaria verde sin haber
+  # hecho nada, que es justo el problema que tenia el workflow_dispatch antes.
+  # Asi, si te olvidas de confirmar, el run se pone rojo y te enteras.
+  # ─────────────────────────────────────────────────────────
+  destroy:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      && inputs.accion == 'destroy'
+      && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./infra
+
+    steps:
+      # El input va por env y no interpolado en el script: un ${{ }} dentro
+      # de un `run` se expande antes de que bash lo vea, asi que un input
+      # malicioso podria inyectar comandos. Por env es solo un string.
+      - name: Verificar la confirmacion
+        if: inputs.confirmacion != 'destruir'
+        env:
+          CONFIRMACION: ${{ inputs.confirmacion }}
+        run: |
+          echo "::error::Para destruir hay que escribir exactamente 'destruir' en el campo de confirmacion. Recibido: '${CONFIRMACION}'"
+          exit 1
+
+      - name: Checkout del codigo
+        uses: actions/checkout@v4
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Init
+        run: terraform init
+
+      # Se muestra que se va a borrar antes de borrarlo. Queda en el log
+      # como registro de que habia en el momento del destroy.
+      - name: Plan del destroy
+        run: terraform plan -destroy -input=false -no-color
+
+      - name: Destroy
+        run: terraform destroy -auto-approve -input=false -no-color
+
+      - name: Avisar en el resumen
+        if: success()
+        run: |
+          {
+            echo "### Stack \`infra/\` destruido"
+            echo ""
+            echo "La VPC y el RDS ya no existen. El bucket de state sigue ahi:"
+            echo "el state queda vacio, no borrado."
+            echo ""
+            echo "Para volver a levantar todo: Run workflow con \`accion: apply\`."
           } >> "$GITHUB_STEP_SUMMARY"
