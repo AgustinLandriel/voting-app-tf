@@ -18,6 +18,7 @@ resource "aws_instance" "k3s" {
   vpc_security_group_ids      = [aws_security_group.k3s_sg.id]
   associate_public_ip_address = true
   user_data_replace_on_change = true
+  iam_instance_profile        = data.aws_iam_instance_profile.ssm.name
   user_data                   = file("${path.module}/scripts/user_data.sh")
 
 
@@ -41,4 +42,10 @@ resource "aws_security_group" "k3s_sg" {
       "0.0.0.0/0"
     ]
   }
+}
+
+data "aws_iam_instance_profile" "ssm" {
+
+  name = "Role-SSM"
+
 }
