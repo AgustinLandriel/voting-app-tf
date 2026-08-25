@@ -8,8 +8,6 @@ terraform {
     }
   }
 
-  # Estado local a proposito: este stack es el que crea el bucket de estado.
-  # Una vez aplicado, se migra con `terraform init -migrate-state`.
   backend "s3" {
     bucket       = "voting-app-tf-state-325503636955"
     key          = "k3s/terraform.tfstate"
