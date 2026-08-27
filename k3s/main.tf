@@ -19,8 +19,8 @@ data "aws_ssm_parameter" "al2023" {
 
 
 resource "aws_instance" "k3s" {
-  ami                         = data.aws_ssm_parameter.al2023.name
-  instance_type               = "t3.medium"
+  ami                         = data.aws_ssm_parameter.al2023.value
+  instance_type               = "m7i-flex.large"
   subnet_id                   = module.vpc.public_subnets[0]
   vpc_security_group_ids      = [aws_security_group.k3s_sg.id]
   associate_public_ip_address = true
